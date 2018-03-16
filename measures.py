@@ -21,6 +21,32 @@ from curses.ascii import isdigit
 from wiktionaryparser import WiktionaryParser
 from bs4 import BeautifulSoup
 from pywsd.lesk import simple_lesk
+from flask import Flask, render_template
+from flask_cors import CORS
+from flask_assets import Bundle, Environment
+
+"""
+app = Flask(__name__)
+CORS(app)
+
+
+bundles = {
+
+    'home_js': Bundle(
+        'js/jquery.js',
+        'js/bootstrap.min.js',
+        'js/jsapi.js',
+        output='gen/home.js'),
+
+    'home_css': Bundle(
+        'css/bootstrap.min.css',
+        output='gen/home.css')
+}
+
+assets = Environment(app)
+
+assets.register(bundles)
+"""
 
 # Decorator
 def time_it(func):
@@ -83,11 +109,12 @@ def Etymology(s_word, measures):
 
 
 # Context
-def Context(pred, measures):
+def Context(word_tokens_nl, s_word, measures, idx):
+	pred = findPrecedingWords(word_tokens_nl, s_word, idx)
 	con_d = {}
 	con_l = []
 	sent = ''
-
+	print(pred)
 	for i in range(0, len(pred)):
 		sent += pred[i] + " "	
 
@@ -135,10 +162,21 @@ def Morphemes(s_word, lang, measures):
 
 
 # Find Preceding Part of the sentence
-def findPrecedingWords(word_tokens_nl, s_word):
+def findPrecedingWords(word_tokens_nl, s_word, idx):
 	for i in range(0, len(word_tokens_nl)):
 		if s_word == word_tokens_nl[i]:
-			return word_tokens_nl[0:i+1]			
+			return word_tokens_nl[0:i+1]
+
+	mn = word_tokens_nl[0:idx]
+	mn.append(s_word)
+	return mn	
+				
+
+# Attach Preceding Words to Dict
+def AttachPredWords(word_tokens_nl, s_word, measures):
+	for i in range(0, len(word_tokens_nl)):
+		if s_word == word_tokens_nl[i]:
+			measures["preceding_words"] = word_tokens_nl[0:i+1]						
 
 # Ambiguity
 def removeAmbiguity(sent, s_word):
@@ -151,7 +189,8 @@ def removeAmbiguity(sent, s_word):
 		return unambiguous		
 
 # Find Synonyms of the Words
-def findSynonyms(syn):
+def findSynonyms(s_word, sent, measures):
+	syn = removeAmbiguity(sent, s_word)	
 	synonyms = []
 	temp = syn.name()
 	root_name = temp.split(".")
@@ -176,13 +215,114 @@ def findSynonyms(syn):
 		for l in syn.lemmas():
 			synonyms.append(l.name())
 
-	return synonyms
+	measures["synonyms"] = synonyms	
+	
+"""
+@app.route('/api', methods=['GET'])
+def get_features():
+"""
+def findMeasures(s_word, word_tokens_nl, lang, sent, idx):
+				
+	manager = Manager()
+	measures = manager.dict()
 
+
+	p1 = Process(target = Definition, args = (s_word, measures, sent))
+	p2 = Process(target = Length_of_Word, args = (s_word, measures))
+	p3 = Process(target = Syllable_Count, args = (s_word, lang, measures))
+	p4 = Process(target = Etymology, args = (s_word, measures))
+	p5 = Process(target = Context, args = (word_tokens_nl, s_word, measures, idx))
+	p6 = Process(target = Familiarity, args = (s_word, measures))
+	p7 = Process(target = Morphemes, args = (s_word, lang, measures))
+	p8 = Process(target = findSynonyms, args = (s_word, sent, measures))
+	p9 = Process(target = AttachPredWords, args = (word_tokens_nl, s_word, measures))
+
+	p1.start()
+	p2.start()
+	p3.start()
+	p4.start()
+	p5.start()
+	p6.start()
+	p7.start()
+	p8.start()
+	p9.start()
+
+	p1.join()
+	p2.join()
+	p3.join()
+	p4.join()
+	p5.join()
+	p6.join()
+	p7.join()
+	p8.join()
+	p9.join()
+
+	# Given Word
+	measures["word"] = s_word
+		
+	# Part of Speech
+	for i in range(0, len(pos_data)):
+		if pos_data[i][0] == s_word:
+			measures["part_of_speech"] = pos_data[i][1]		
+		
+	f = json.dumps(measures.copy())
+
+	# Convert str to dictionary
+	final_measures = {}
+	final_measures = ast.literal_eval(f)
+	
+	return final_measures				 			
+
+
+def findMeasuresForSynonyms(s_word, word_tokens_nl, lang, idx):
+				
+	manager = Manager()
+	measures = manager.dict()
+
+
+	p2 = Process(target = Length_of_Word, args = (s_word, measures))
+	p3 = Process(target = Syllable_Count, args = (s_word, lang, measures))
+	p4 = Process(target = Etymology, args = (s_word, measures))
+	p5 = Process(target = Context, args = (word_tokens_nl, s_word, measures, idx))
+	p6 = Process(target = Familiarity, args = (s_word, measures))
+	p7 = Process(target = Morphemes, args = (s_word, lang, measures))
+
+	p2.start()
+	p3.start()
+	p4.start()
+	p5.start()
+	p6.start()
+	p7.start()
+
+
+	p2.join()
+	p3.join()
+	p4.join()
+	p5.join()
+	p6.join()
+	p7.join()
+
+	# Given Word
+	measures["word"] = s_word
+		
+	# Part of Speech
+	for i in range(0, len(pos_data)):
+		if pos_data[i][0] == s_word:
+			measures["part_of_speech"] = pos_data[i][1]		
+		
+	f = json.dumps(measures.copy())
+
+	# Convert str to dictionary
+	final_measures = {}
+	final_measures = ast.literal_eval(f)
+	
+	return final_measures
 
 if __name__ == '__main__':
+
 	start_time = time.time()
-	
-	sent = "He revoked his admit"
+
+	sent = "The cat perched on the mat"
 	lang = "en_US"
 
 	stop_words = set(stopwords.words('english'))
@@ -191,7 +331,6 @@ if __name__ == '__main__':
 	pos_tags = nltk.pos_tag(word_tokens)
 
 	filtered_sentence = [ w for w in word_tokens if not w in stop_words ]
-
 
 	pos_data = []
 	words_to_be_analyzed = []
@@ -202,55 +341,39 @@ if __name__ == '__main__':
 				words_to_be_analyzed.append(filtered_sentence[i])
 				pos_data.append((filtered_sentence[i], pos_tags[j][1]))
 
-	if len(words_to_be_analyzed) != 0:			
+	if len(words_to_be_analyzed) != 0:
 		s_word = words_to_be_analyzed[0]
-		syn = removeAmbiguity(sent, s_word)			
-		pred = findPrecedingWords(word_tokens_nl, s_word)
-		manager = Manager()
-		measures = manager.dict()
+		idx = 0
+		measures = findMeasures(s_word, word_tokens_nl, lang, sent, idx)
 
+		for i in range(0, len(word_tokens_nl)):
+			if s_word == word_tokens_nl[i]:
+				idx = i
 
-		p1 = Process(target = Definition, args = (s_word, measures, sent))
-		p2 = Process(target = Length_of_Word, args = (s_word, measures))
-		p3 = Process(target = Syllable_Count, args = (s_word, lang, measures))
-		p4 = Process(target = Etymology, args = (s_word, measures))
-		p5 = Process(target = Context, args = (pred, measures))
-		p6 = Process(target = Familiarity, args = (s_word, measures))
-		p7 = Process(target = Morphemes, args = (s_word, lang, measures))
+		synonyms = measures["synonyms"]
 
-		p1.start()
-		p2.start()
-		p3.start()
-		p4.start()
-		p5.start()
-		p6.start()
-		p7.start()
+		synonyms_measures = []
+		for s in range(0, len(synonyms)):
+			synonyms_measures.append(findMeasuresForSynonyms(synonyms[s], word_tokens_nl, lang, idx))
 
-		p1.join()
-		p2.join()
-		p3.join()
-		p4.join()
-		p5.join()
-		p6.join()
-		p7.join()
-
-		# Given Word
-		measures["word"] = s_word
-
-		# Synonyms
-		measures["synonyms"] = findSynonyms(syn)
-
-		# Part of Speech
-		for i in range(0, len(pos_data)):
-			if pos_data[i][0] == s_word:
-				measures["part_of_speech"] = pos_data[i][1]
-
-		# Preceding Words
-		measures["preceding_words"] = findPrecedingWords(word_tokens_nl, s_word)		
-				 
-
-		print(measures)
+		print(synonyms_measures)	
+		
 	else:
-		print("Sentence has no verbs")		
+		print("Sentence has no verbs")
 
-	print("Execution Time: %s seconds" %(time.time() - start_time))
+	print("Execution Time: %s seconds" %(time.time() - start_time))		
+
+
+"""
+@app.route('/', methods = ['GET'])
+def index():
+	return render_template('index.html')
+
+
+if __name__ == '__main__':
+	app.config.update(
+		TEMPLATES_AUTO_RELOAD = True
+	)
+	app.run(debug = True)	
+
+"""	
