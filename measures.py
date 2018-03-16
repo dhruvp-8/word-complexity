@@ -10,7 +10,7 @@ import ast
 import time
 import string
 
-from multiprocessing import Process, Manager
+from multiprocessing import Process, Manager, Pool
 from pyphen import Pyphen
 from nltk.corpus import cmudict
 from nltk.corpus import wordnet as wn
@@ -21,32 +21,7 @@ from curses.ascii import isdigit
 from wiktionaryparser import WiktionaryParser
 from bs4 import BeautifulSoup
 from pywsd.lesk import simple_lesk
-from flask import Flask, render_template
-from flask_cors import CORS
-from flask_assets import Bundle, Environment
-
-"""
-app = Flask(__name__)
-CORS(app)
-
-
-bundles = {
-
-    'home_js': Bundle(
-        'js/jquery.js',
-        'js/bootstrap.min.js',
-        'js/jsapi.js',
-        output='gen/home.js'),
-
-    'home_css': Bundle(
-        'css/bootstrap.min.css',
-        output='gen/home.css')
-}
-
-assets = Environment(app)
-
-assets.register(bundles)
-"""
+from tensefinder import changeTense
 
 # Decorator
 def time_it(func):
@@ -109,8 +84,8 @@ def Etymology(s_word, measures):
 
 
 # Context
-def Context(word_tokens_nl, s_word, measures, idx):
-	pred = findPrecedingWords(word_tokens_nl, s_word, idx)
+def Context(word_tokens_nl, s_word, measures, idx, main_pos):
+	pred = findPrecedingWords(word_tokens_nl, s_word, idx, main_pos)
 	con_d = {}
 	con_l = []
 	sent = ''
@@ -143,7 +118,7 @@ def Familiarity(s_word, measures):
 	if s_word in word_count.keys():
 		measures["familiarity"] = word_count[s_word]
 	else:
-		measures["familiarity"] = "Not Found"
+		measures["familiarity"] = 0
 
 
 # Number of morphemes
@@ -160,14 +135,43 @@ def Morphemes(s_word, lang, measures):
 		measures["morphemes"] = "Not Found"
 		measures["morphemes_count"] = 0	
 
+# Tense Finder
+def correctTense(s_word, tense):
+	word = s_word
+
+	text_file = open('./data/irregular_verbs_form.txt', 'r')
+	lines = text_file.read()
+	words = lines.split("\n")
+	text_file.close()
+	past_simple = {}
+	past_participle = {}
+
+	for i in range(0, len(words), 3):
+		past_simple[words[i]] = words[i+1]
+
+	for i in range(0, len(words), 3):
+		past_participle[words[i]] = words[i+2]
+
+	if tense == "VBD":
+		if word in past_simple:
+			return past_simple[word]
+		else:
+			return changeTense(word, tense)
+	else:
+		return changeTense(word, tense)	
+
+
 
 # Find Preceding Part of the sentence
-def findPrecedingWords(word_tokens_nl, s_word, idx):
+def findPrecedingWords(word_tokens_nl, s_word, idx, main_pos):
 	for i in range(0, len(word_tokens_nl)):
 		if s_word == word_tokens_nl[i]:
 			return word_tokens_nl[0:i+1]
 
 	mn = word_tokens_nl[0:idx]
+
+	# Adjust the tense of the synonym
+	s_word = correctTense(s_word, main_pos)
 	mn.append(s_word)
 	return mn	
 				
@@ -216,12 +220,88 @@ def findSynonyms(s_word, sent, measures):
 			synonyms.append(l.name())
 
 	measures["synonyms"] = synonyms	
-	
-"""
-@app.route('/api', methods=['GET'])
-def get_features():
-"""
-def findMeasures(s_word, word_tokens_nl, lang, sent, idx):
+
+
+def RankEvaluationModule(measures, synonyms_measures):
+
+	pointsForRootWord_dict = {}
+	pointsForSubWord_dict = {}
+
+	for i in range(0, len(synonyms_measures)):
+
+		pointsForRootWord = 0
+		pointsForSubWord = 0
+
+		# Rank For Length of Word
+		if measures["length_of_word"] >= synonyms_measures[i]["length_of_word"]:
+			pointsForSubWord += 1
+		else:
+			pointsForRootWord += 1	
+
+		# Rank For Number of Syllable	
+		if measures["no_of_syllables"] >= synonyms_measures[i]["no_of_syllables"]:
+			pointsForSubWord += 1
+		else:
+			pointsForRootWord += 1	
+
+		# Rank For Familiarity
+		if measures["familiarity"] <= synonyms_measures[i]["familiarity"]:
+			pointsForSubWord += 2
+		else:
+			pointsForRootWord += 2	
+
+		# Rank For Context
+		if synonyms_measures[i]["context"] != "Not Found":
+			if measures["context"][0]["volume_count"] <= synonyms_measures[i]["context"][0]["volume_count"]:
+				pointsForSubWord += 3
+			else:
+				pointsForRootWord += 3	
+		else:
+			pointsForRootWord += 3
+
+		# Rank For Morphemes
+		if measures["morphemes_count"] >= synonyms_measures[i]["morphemes_count"]:
+			pointsForSubWord += 1
+		else:
+			pointsForRootWord += 1
+
+		# Rank For Etymology
+		if synonyms_measures[i]["etymology"] != "Not Found":
+			flag = 0
+			for x in range(0, len(synonyms_measures[i]["etymology"])):	
+				if 'latin' in synonyms_measures[i]["etymology"][x].lower() or 'greek' in synonyms_measures[i]["etymology"][x].lower():
+					pointsForRootWord += 2
+					flag = 1
+					break
+
+			if flag == 0:
+				f1 = 0
+				for y in range(0, len(measures["etymology"])):
+					if 'latin' in measures["etymology"][y].lower() or 'greek' in measures["etymology"][y].lower():
+						pointsForSubWord += 2
+						fl = 1
+						break
+
+				if fl == 0:
+					pointsForSubWord += 1
+					pointsForRootWord += 1				
+		else:
+			pointsForRootWord += 2
+
+		pointsForSubWord_dict[synonyms_measures[i]["word"]] = pointsForSubWord
+		
+		mixer = measures["word"] + '_' + synonyms_measures[i]["word"]
+
+		pointsForRootWord_dict[mixer] = pointsForRootWord
+
+	print("Synonyms Points\n")
+	print(pointsForSubWord_dict)
+	print("\n")
+	print("Root Word Points\n")
+	print(pointsForRootWord_dict)				
+
+
+def findMeasures(s_word, word_tokens_nl, lang, sent, idx, main_pos):
 				
 	manager = Manager()
 	measures = manager.dict()
@@ -231,7 +311,7 @@ def findMeasures(s_word, word_tokens_nl, lang, sent, idx):
 	p2 = Process(target = Length_of_Word, args = (s_word, measures))
 	p3 = Process(target = Syllable_Count, args = (s_word, lang, measures))
 	p4 = Process(target = Etymology, args = (s_word, measures))
-	p5 = Process(target = Context, args = (word_tokens_nl, s_word, measures, idx))
+	p5 = Process(target = Context, args = (word_tokens_nl, s_word, measures, idx, main_pos))
 	p6 = Process(target = Familiarity, args = (s_word, measures))
 	p7 = Process(target = Morphemes, args = (s_word, lang, measures))
 	p8 = Process(target = findSynonyms, args = (s_word, sent, measures))
@@ -274,7 +354,7 @@ def findMeasures(s_word, word_tokens_nl, lang, sent, idx):
 	return final_measures				 			
 
 
-def findMeasuresForSynonyms(s_word, word_tokens_nl, lang, idx):
+def findMeasuresForSynonyms(s_word, word_tokens_nl, lang, idx, main_pos):
 				
 	manager = Manager()
 	measures = manager.dict()
@@ -283,7 +363,7 @@ def findMeasuresForSynonyms(s_word, word_tokens_nl, lang, idx):
 	p2 = Process(target = Length_of_Word, args = (s_word, measures))
 	p3 = Process(target = Syllable_Count, args = (s_word, lang, measures))
 	p4 = Process(target = Etymology, args = (s_word, measures))
-	p5 = Process(target = Context, args = (word_tokens_nl, s_word, measures, idx))
+	p5 = Process(target = Context, args = (word_tokens_nl, s_word, measures, idx, main_pos))
 	p6 = Process(target = Familiarity, args = (s_word, measures))
 	p7 = Process(target = Morphemes, args = (s_word, lang, measures))
 
@@ -344,19 +424,20 @@ if __name__ == '__main__':
 	if len(words_to_be_analyzed) != 0:
 		s_word = words_to_be_analyzed[0]
 		idx = 0
-		measures = findMeasures(s_word, word_tokens_nl, lang, sent, idx)
-
+		main_pos = ''
+		measures = findMeasures(s_word, word_tokens_nl, lang, sent, idx, main_pos)
 		for i in range(0, len(word_tokens_nl)):
 			if s_word == word_tokens_nl[i]:
 				idx = i
 
 		synonyms = measures["synonyms"]
-
+		main_pos = measures["part_of_speech"]
 		synonyms_measures = []
 		for s in range(0, len(synonyms)):
-			synonyms_measures.append(findMeasuresForSynonyms(synonyms[s], word_tokens_nl, lang, idx))
+			synonyms_measures.append(findMeasuresForSynonyms(synonyms[s], word_tokens_nl, lang, idx, main_pos))
 
-		print(synonyms_measures)	
+		#print(synonyms_measures)
+		RankEvaluationModule(measures, synonyms_measures)	
 		
 	else:
 		print("Sentence has no verbs")
@@ -364,16 +445,3 @@ if __name__ == '__main__':
 	print("Execution Time: %s seconds" %(time.time() - start_time))		
 
 
-"""
-@app.route('/', methods = ['GET'])
-def index():
-	return render_template('index.html')
-
-
-if __name__ == '__main__':
-	app.config.update(
-		TEMPLATES_AUTO_RELOAD = True
-	)
-	app.run(debug = True)	
-
-"""	
