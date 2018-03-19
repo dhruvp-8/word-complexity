@@ -140,7 +140,7 @@ def changeTense(word, tense):
 
 if __name__ == "__main__":
 
-	word = "vie"
+	word = "keep"
 	tense = "VBD"
 
 	text_file = open('./data/irregular_verbs_form.txt', 'r')

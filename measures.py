@@ -8,6 +8,7 @@ import lxml
 import re
 import ast
 import time
+import operator
 import string
 
 from multiprocessing import Process, Manager, Pool
@@ -157,8 +158,10 @@ def correctTense(s_word, tense):
 			return past_simple[word]
 		else:
 			return changeTense(word, tense)
+	elif tense == "JJ" or tense == "JJR" or tense == "JJS":
+		return word	
 	else:
-		return changeTense(word, tense)	
+		return changeTense(word, tense)		
 
 
 
@@ -193,7 +196,7 @@ def removeAmbiguity(sent, s_word):
 		return unambiguous		
 
 # Find Synonyms of the Words
-def findSynonyms(s_word, sent, measures):
+def findSynonyms(s_word, sent, measures, main_pos):
 	syn = removeAmbiguity(sent, s_word)	
 	synonyms = []
 	temp = syn.name()
@@ -211,7 +214,19 @@ def findSynonyms(s_word, sent, measures):
 
 	if r.status_code == 200:
 		data = r.json()
-		l = data["results"][0]["lexicalEntries"][0]["entries"][0]["senses"][0]["synonyms"]
+		#l = data["results"][0]["lexicalEntries"][0]["entries"][0]["senses"][0]["synonyms"]
+
+		mapper = {'VBD': 'Verb', 'VBG': 'Verb', 'JJ': 'Adjective', 'JJR': 'Adjective', 'JJS': 'Adjective'}
+		checkEnt = ''
+		for key, value in mapper.items():
+			if key == main_pos:
+				checkEnt = value
+				break
+		l = []
+		for i in range(0, len(data["results"][0]["lexicalEntries"])):
+			if data["results"][0]["lexicalEntries"][i]["lexicalCategory"] == checkEnt:
+				l = data["results"][0]["lexicalEntries"][i]["entries"][0]["senses"][0]["synonyms"]
+				break
 
 		for i in l:
 			synonyms.append(i["text"])
@@ -222,7 +237,7 @@ def findSynonyms(s_word, sent, measures):
 	measures["synonyms"] = synonyms	
 
 
-def RankEvaluationModule(measures, synonyms_measures):
+def RankEvaluationModule(measures, synonyms_measures, main_pos):
 
 	pointsForRootWord_dict = {}
 	pointsForSubWord_dict = {}
@@ -294,11 +309,17 @@ def RankEvaluationModule(measures, synonyms_measures):
 
 		pointsForRootWord_dict[mixer] = pointsForRootWord
 
+	print("\n")
 	print("Synonyms Points\n")
 	print(pointsForSubWord_dict)
 	print("\n")
 	print("Root Word Points\n")
-	print(pointsForRootWord_dict)				
+	print(pointsForRootWord_dict)
+	print("\n")
+	ranked_word = max(pointsForSubWord_dict.items(), key=operator.itemgetter(1))[0]
+	gr_ranked_word = correctTense(ranked_word, main_pos)
+
+	return gr_ranked_word				
 
 
 def findMeasures(s_word, word_tokens_nl, lang, sent, idx, main_pos):
@@ -314,7 +335,7 @@ def findMeasures(s_word, word_tokens_nl, lang, sent, idx, main_pos):
 	p5 = Process(target = Context, args = (word_tokens_nl, s_word, measures, idx, main_pos))
 	p6 = Process(target = Familiarity, args = (s_word, measures))
 	p7 = Process(target = Morphemes, args = (s_word, lang, measures))
-	p8 = Process(target = findSynonyms, args = (s_word, sent, measures))
+	p8 = Process(target = findSynonyms, args = (s_word, sent, measures, main_pos))
 	p9 = Process(target = AttachPredWords, args = (word_tokens_nl, s_word, measures))
 
 	p1.start()
@@ -414,7 +435,7 @@ if __name__ == '__main__':
 
 	pos_data = []
 	words_to_be_analyzed = []
-	verbs = ["VB", "VBD", "VBG", "VBN", "VBP", "VBZ"]
+	verbs = ["VB", "VBD", "VBG", "VBN", "VBP", "VBZ", "JJ", "JJS", "JJR"]
 	for i in range(0, len(filtered_sentence)):
 		for j in range(0, len(pos_tags)):
 			if filtered_sentence[i] == pos_tags[j][0] and pos_tags[j][1] in verbs:
@@ -425,11 +446,17 @@ if __name__ == '__main__':
 		s_word = words_to_be_analyzed[0]
 		idx = 0
 		main_pos = ''
+
+		# For initial instance to obtain POS
+		for i in range(0, len(pos_data)):
+			if pos_data[i][0] == s_word:
+				main_pos = pos_data[i][1]
+
 		measures = findMeasures(s_word, word_tokens_nl, lang, sent, idx, main_pos)
 		for i in range(0, len(word_tokens_nl)):
 			if s_word == word_tokens_nl[i]:
 				idx = i
-
+		print(measures)		
 		synonyms = measures["synonyms"]
 		main_pos = measures["part_of_speech"]
 		synonyms_measures = []
@@ -437,10 +464,20 @@ if __name__ == '__main__':
 			synonyms_measures.append(findMeasuresForSynonyms(synonyms[s], word_tokens_nl, lang, idx, main_pos))
 
 		#print(synonyms_measures)
-		RankEvaluationModule(measures, synonyms_measures)	
+		fin_ranked_word = RankEvaluationModule(measures, synonyms_measures, main_pos)
+
+		simplified_sentence = []
+		for i in range(0, len(word_tokens_nl)):
+			if i == idx:
+				simplified_sentence.append(fin_ranked_word)
+			else:
+				simplified_sentence.append(word_tokens_nl[i])
+
+		print(simplified_sentence)			
+
 		
 	else:
-		print("Sentence has no verbs")
+		print("Sentence cannot be simplified")
 
 	print("Execution Time: %s seconds" %(time.time() - start_time))		
 
