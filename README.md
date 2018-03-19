@@ -4,10 +4,11 @@ This project targets on the lexical simplification of a sentence based on the Fe
 
 ## The Model
 
-The model consists three modules which are: 
-..* Feature Extraction Module *(FEM)*
-..* Word Substitution Ranking Module *(WSRM)*
-..* Result Fetching Module *(RFM)*
+The model consists three modules which are:
+
+1. **Feature Extraction Module** *(FEM)*
+2. **Word Substitution Ranking Module** *(WSRM)*
+3. **Result Fetching Module** *(RFM)*
 
 ![Alt text](./images/Sentence_Simplification-1.jpg "Automatic Lexical Simplification")
 
@@ -72,14 +73,13 @@ The JSON object received from the FEM module can be shown by the below figures
 
 The final output received when we input a sentence is this:
 
-```
+
 Input Sentence is:  **John revoked his admit**
-```
+
 ![Alt text](./images/Final_Output.PNG "Final Output")
 
-```
 Output Sentence is:  **John withdrew his admit**
-```
+
 ## Running the tests
 
 No Tests to show currently.
