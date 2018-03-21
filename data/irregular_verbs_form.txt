@@ -239,8 +239,8 @@ lie
 lay
 lain
 light
-lit /lighted
-lit /lighted
+lit/lighted
+lit/lighted
 lose
 lost
 lost
@@ -278,8 +278,8 @@ pay
 paid
 paid
 plead
-pleaded/ pled
-pleaded/ pled
+pleaded/pled
+pleaded/pled
 prove
 proved
 proved/proven
@@ -309,7 +309,7 @@ ran
 run
 saw
 sawed
-sawn /sawed
+sawn/sawed
 say
 said
 said
@@ -393,7 +393,7 @@ spoke
 spoken
 speed
 sped/speeded
-sped /speeded
+sped/speeded
 spell
 spelt/spelled
 spelt/spelled

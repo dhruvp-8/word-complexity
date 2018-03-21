@@ -1,7 +1,7 @@
 import os
+import sys
 import nltk
 import curses
-from requests import get
 import json
 import urllib3
 import lxml
@@ -12,6 +12,7 @@ import operator
 import string
 
 from multiprocessing import Process, Manager, Pool
+from requests import get
 from pyphen import Pyphen
 from nltk.corpus import cmudict
 from nltk.corpus import wordnet as wn
@@ -229,14 +230,15 @@ def findSynonyms(s_word, sent, measures, main_pos):
 				break
 
 		for i in l:
-			synonyms.append(i["text"])
+			if ' ' not in i["text"]:
+				synonyms.append(i["text"])
 	else:	
 		for l in syn.lemmas():
 			synonyms.append(l.name())
 
 	measures["synonyms"] = synonyms	
 
-
+# Ranking of the synonyms
 def RankEvaluationModule(measures, synonyms_measures, main_pos):
 
 	pointsForRootWord_dict = {}
@@ -267,10 +269,13 @@ def RankEvaluationModule(measures, synonyms_measures, main_pos):
 
 		# Rank For Context
 		if synonyms_measures[i]["context"] != "Not Found":
-			if measures["context"][0]["volume_count"] <= synonyms_measures[i]["context"][0]["volume_count"]:
-				pointsForSubWord += 3
+			if measures["context"] != "Not Found":
+				if measures["context"][0]["volume_count"] <= synonyms_measures[i]["context"][0]["volume_count"]:
+					pointsForSubWord += 3
+				else:
+					pointsForRootWord += 3
 			else:
-				pointsForRootWord += 3	
+				pointsForSubWord += 3			
 		else:
 			pointsForRootWord += 3
 
@@ -291,15 +296,18 @@ def RankEvaluationModule(measures, synonyms_measures, main_pos):
 
 			if flag == 0:
 				f1 = 0
-				for y in range(0, len(measures["etymology"])):
-					if 'latin' in measures["etymology"][y].lower() or 'greek' in measures["etymology"][y].lower():
-						pointsForSubWord += 2
-						fl = 1
-						break
+				if measures["etymology"] != "Not Found":
+					for y in range(0, len(measures["etymology"])):
+						if 'latin' in measures["etymology"][y].lower() or 'greek' in measures["etymology"][y].lower():
+							pointsForSubWord += 2
+							fl = 1
+							break
 
-				if fl == 0:
-					pointsForSubWord += 1
-					pointsForRootWord += 1				
+					if fl == 0:
+						pointsForSubWord += 1
+						pointsForRootWord += 1
+				else:
+					pointsForSubWord += 1						
 		else:
 			pointsForRootWord += 2
 
@@ -416,15 +424,17 @@ def findMeasuresForSynonyms(s_word, word_tokens_nl, lang, idx, main_pos):
 	# Convert str to dictionary
 	final_measures = {}
 	final_measures = ast.literal_eval(f)
-	
+
 	return final_measures
 
+
+# Code Start
 if __name__ == '__main__':
 
 	start_time = time.time()
 
-	sent = "The cat perched on the mat"
-	lang = "en_US"
+	sent = str(sys.argv[1])
+	lang = str(sys.argv[2])
 
 	stop_words = set(stopwords.words('english'))
 	word_tokens = word_tokenize(sent.lower())
@@ -453,29 +463,31 @@ if __name__ == '__main__':
 				main_pos = pos_data[i][1]
 
 		measures = findMeasures(s_word, word_tokens_nl, lang, sent, idx, main_pos)
-		for i in range(0, len(word_tokens_nl)):
-			if s_word == word_tokens_nl[i]:
-				idx = i
-		print(measures)		
-		synonyms = measures["synonyms"]
-		main_pos = measures["part_of_speech"]
-		synonyms_measures = []
-		for s in range(0, len(synonyms)):
-			synonyms_measures.append(findMeasuresForSynonyms(synonyms[s], word_tokens_nl, lang, idx, main_pos))
 
-		#print(synonyms_measures)
-		fin_ranked_word = RankEvaluationModule(measures, synonyms_measures, main_pos)
+		if len(measures["synonyms"]) != 0:
+			for i in range(0, len(word_tokens_nl)):
+				if s_word == word_tokens_nl[i]:
+					idx = i
+			print(measures)		
+			synonyms = measures["synonyms"]
+			main_pos = measures["part_of_speech"]
+			synonyms_measures = []
+			for s in range(0, len(synonyms)):
+				synonyms_measures.append(findMeasuresForSynonyms(synonyms[s], word_tokens_nl, lang, idx, main_pos))
 
-		simplified_sentence = []
-		for i in range(0, len(word_tokens_nl)):
-			if i == idx:
-				simplified_sentence.append(fin_ranked_word)
-			else:
-				simplified_sentence.append(word_tokens_nl[i])
+			#print(synonyms_measures)
+			fin_ranked_word = RankEvaluationModule(measures, synonyms_measures, main_pos)
 
-		print(simplified_sentence)			
+			simplified_sentence = []
+			for i in range(0, len(word_tokens_nl)):
+				if i == idx:
+					simplified_sentence.append(fin_ranked_word)
+				else:
+					simplified_sentence.append(word_tokens_nl[i])
 
-		
+			print(simplified_sentence)
+		else:
+			print(word_tokens_nl)			
 	else:
 		print("Sentence cannot be simplified")
 
